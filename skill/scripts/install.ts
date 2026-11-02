@@ -2,11 +2,18 @@
 /**
  * prompt-blocker installer.
  *
- * Safely adds the plugin entry to an OpenCode configuration file. Run from
- * the skill directory:
+ * Manages the plugin's configuration entry safely. For global installs the
+ * official CLI is preferred — `opencode plugin add <spec>` installs the
+ * package AND writes the config with a safe atomic edit. This script covers
+ * project-scope installs, environments without that CLI, and configuration
+ * the CLI does not handle. Run from the skill directory:
  *
  *   bun scripts/install.ts [--global | --project <dir>] [--package <spec>]
  *                          [--mode <mode>] [--dry-run]
+ *
+ * Updating an already-installed plugin is NOT this script's job — use
+ * `opencode plugin update [target]` (it refreshes the cached package). The
+ * script says so when it finds an existing entry.
  *
  * Why a script instead of instructions to edit the file by hand: freehand
  * edits into strict `opencode.json` files can leave trailing commas or break
@@ -256,6 +263,24 @@ export function hasPromptBlocker(value: unknown): boolean {
   })
 }
 
+/** The spec of the existing prompt-blocker entry, if any (string or object form). */
+export function existingPromptBlockerSpec(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return undefined
+  for (const entry of value) {
+    if (typeof entry === "string" && entry.includes("prompt-blocker")) return entry
+    if (entry && typeof entry === "object") {
+      const pkg = (entry as { package?: unknown }).package
+      if (typeof pkg === "string" && pkg.includes("prompt-blocker")) return pkg
+    }
+  }
+  return undefined
+}
+
+/** True when a plugin spec refers to a local directory rather than a package. */
+export function isLocalSpec(spec: string): boolean {
+  return spec === "." || spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("/") || spec.startsWith("file:")
+}
+
 /**
  * Add a prompt-blocker entry to config text with a minimal splice.
  * The input must be parseable JSON/JSONC; unparseable or surprising files
@@ -382,9 +407,10 @@ const USAGE = `prompt-blocker installer
   --mode M     also set the plugin's mode option
   --dry-run    show what would change without writing anything
 
-The script only adds the plugins entry: comments, formatting, and unrelated
-keys are preserved, the result is validated before it is written, a backup is
-kept, and re-running it is safe (it detects existing prompt-blocker entries).`
+The script only manages the plugins config entry: comments, formatting, and
+unrelated keys are preserved, the result is validated before it is written, a
+backup is kept, and re-running it is safe. To UPDATE an installed plugin, use
+"opencode plugin update [target]" followed by "opencode service restart".`
 
 function parseArgs(argv: string[]): Args {
   const args: Args = { scope: "global", pkg: DEFAULT_PACKAGE, dryRun: false }
@@ -486,7 +512,19 @@ export async function run(argv: string[]): Promise<number> {
   const result = insertPlugin(original, args.pkg, args.mode)
 
   if (result.status === "already-present") {
-    console.log(`prompt-blocker is already configured in ${file} — nothing to do.`)
+    const parsedOriginal = parseConfig(original) as Record<string, unknown>
+    const existing = existingPromptBlockerSpec(parsedOriginal?.plugins)
+    console.log(`prompt-blocker is already configured in ${file}${existing ? ` (${existing})` : ""}.`)
+    console.log("This script only manages the configuration entry — it does not update installed packages.")
+    if (existing && !isLocalSpec(existing)) {
+      console.log("To update the installed plugin:")
+      console.log(`  opencode plugin check ${existing}    # optional: is it outdated?`)
+      console.log(`  opencode plugin update ${existing}   # or bare: opencode plugin update`)
+      console.log("  opencode service restart")
+    } else if (existing) {
+      console.log("The entry points at a local directory: update that checkout (e.g. git pull), then:")
+      console.log("  opencode service restart")
+    }
     return 0
   }
   if (result.status === "needs-manual" || result.text === undefined) {

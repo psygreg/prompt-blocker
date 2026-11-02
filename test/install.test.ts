@@ -3,8 +3,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import {
   buildEntry,
   createConfig,
+  existingPromptBlockerSpec,
   hasPromptBlocker,
   insertPlugin,
+  isLocalSpec,
   parseConfig,
   scan,
   toJson,
@@ -184,6 +186,24 @@ describe("hasPromptBlocker / buildEntry", () => {
     expect(hasPromptBlocker("prompt-blocker")).toBe(false)
   })
 
+  test("existingPromptBlockerSpec returns the configured spec", () => {
+    expect(existingPromptBlockerSpec(["github:psygreg/prompt-blocker"])).toBe("github:psygreg/prompt-blocker")
+    expect(existingPromptBlockerSpec([{ package: "prompt-blocker", options: { mode: "strict" } }])).toBe("prompt-blocker")
+    expect(existingPromptBlockerSpec([{ package: "./plugins/prompt-blocker" }])).toBe("./plugins/prompt-blocker")
+    expect(existingPromptBlockerSpec([{ package: "agent-reflex" }])).toBeUndefined()
+    expect(existingPromptBlockerSpec(undefined)).toBeUndefined()
+  })
+
+  test("isLocalSpec distinguishes local paths from package specs", () => {
+    expect(isLocalSpec(".")).toBe(true)
+    expect(isLocalSpec("./plugins/x")).toBe(true)
+    expect(isLocalSpec("../shared")).toBe(true)
+    expect(isLocalSpec("/abs/path")).toBe(true)
+    expect(isLocalSpec("file:///x")).toBe(true)
+    expect(isLocalSpec("prompt-blocker")).toBe(false)
+    expect(isLocalSpec("github:psygreg/prompt-blocker")).toBe(false)
+  })
+
   test("buildEntry with and without mode", () => {
     expect(buildEntry("p")).toBe(`{ "package": "p" }`)
     expect(buildEntry("p", "audit")).toBe(`{ "package": "p", "options": { "mode": "audit" } }`)
@@ -212,7 +232,12 @@ describe("install CLI end-to-end", () => {
 
     const second = Bun.spawnSync(["bun", script, "--global"], { env, stdout: "pipe", stderr: "pipe" })
     expect(second.exitCode).toBe(0)
-    expect(second.stdout.toString()).toContain("already configured")
+    const output = second.stdout.toString()
+    expect(output).toContain("already configured")
+    // The already-present path must point at the real update mechanism
+    // instead of claiming "nothing to do".
+    expect(output).toContain("opencode plugin update")
+    expect(output).toContain("does not update installed packages")
     expect(readFileSync(`${configDir}/opencode.json`, "utf8")).toBe(edited)
   })
 })

@@ -35,12 +35,20 @@ model to treat it as data, and the subagent cannot act on anything it reads.
 
 ## Install
 
-The easiest path is the installer script bundled with the skill — it edits the
-config safely (preserves comments and unrelated keys, no trailing commas,
-validates before writing, keeps a backup, idempotent):
+The easiest path is the official CLI — it installs the package and adds it to
+the global config with a safe, atomic edit that preserves unrelated settings:
 
 ```sh
-bun skill/scripts/install.ts --global
+opencode plugin add github:psygreg/prompt-blocker
+```
+
+For a single project (or environments without the `opencode plugin`
+subcommand), the installer script bundled with the skill edits the config
+safely — it preserves comments and unrelated keys, leaves no trailing commas,
+validates before writing, keeps a backup, and is idempotent:
+
+```sh
+bun skill/scripts/install.ts --project <dir>   # or --global
 ```
 
 Or add the plugin by hand in `~/.config/opencode/opencode.json` (all projects)
@@ -76,6 +84,21 @@ From source (this repository):
 
 Then restart the background service (`opencode service restart`) and verify
 with the `/prompt-blocker` command.
+
+## Updating
+
+OpenCode checks package plugins against their source about once a day and
+flags outdated ones (`opencode plugin check`, `opencode plugin list`), but it
+never auto-updates:
+
+```sh
+opencode plugin update github:psygreg/prompt-blocker   # or bare: update every outdated plugin
+opencode service restart
+```
+
+For a config entry that points at a local directory, `git pull` that checkout
+instead, then restart. Re-running the installer script only manages the
+config entry — it never updates an installed package.
 
 > This repository dogfoods itself: `.opencode/opencode.jsonc` loads the plugin
 > from the checkout. Run `bun install` after cloning so the plugin's
