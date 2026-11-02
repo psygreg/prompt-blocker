@@ -30,7 +30,8 @@
   "devDependencies": {
     "@opencode/plugin": "latest",
     "bun-types": "latest",
-    "typescript": "latest"
+    "typescript": "latest",
+    "yaml": "^2.9.1"
   },
   "peerDependencies": {
     "@opencode/plugin": ">=2"
