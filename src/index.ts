@@ -18,13 +18,16 @@
 import { open, stat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync, statSync, type Dirent } from "node:fs"
 import { Agent, Plugin, Skill } from "@opencode/plugin"
 import { scanText, type ScanReport } from "./detect.js"
-import { actionFor, isTrustedPath, parseOptions, type Options } from "./policy.js"
+import { actionFor, isTrustedPath, parseOptions, surfaceActionFor, type Options } from "./policy.js"
+import { analyzeSurface, type SurfaceItem } from "./surface.js"
+import { sanitizeText, type ScanReport as SurfaceReport } from "./detect.js"
 import {
   annotateResult,
   applyToResult,
+  flagBanner,
   attachmentAdvisory,
   attachmentRemovedNotice,
   describeTarget,
@@ -91,6 +94,61 @@ function loadSkill(): { path: string; content: string } {
   }
 }
 
+/**
+ * Text form of a tool's input schema, so parameter descriptions and names are
+ * scanned too. Effect schemas can be cyclic or hold functions; those parts are
+ * dropped, and a failure yields an empty string rather than a crash.
+ */
+function schemaText(input: unknown): string {
+  const seen = new WeakSet<object>()
+  try {
+    return JSON.stringify(input, (_key, value) => {
+      if (typeof value === "function") return undefined
+      if (value && typeof value === "object") {
+        if (seen.has(value)) return undefined
+        seen.add(value)
+      }
+      return value
+    }) ?? ""
+  } catch {
+    return ""
+  }
+}
+
+/**
+ * Helper scripts bundled next to a skill's SKILL.md. Synchronous because it
+ * runs inside a transform callback. Shallow and capped to keep boot cheap.
+ */
+function readSkillScripts(skillPath: string, maxBytes: number): { path: string; text: string }[] {
+  const out: { path: string; text: string }[] = []
+  const walk = (dir: string, depth: number) => {
+    if (depth > 2 || out.length >= 50) return
+    let entries: Dirent<string>[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true, encoding: "utf8" })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (out.length >= 50) return
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name !== "node_modules") walk(path, depth + 1)
+      } else if (entry.isFile() && entry.name !== "SKILL.md") {
+        try {
+          if (statSync(path).size > maxBytes) continue
+          const text = readFileSync(path, "utf8")
+          if (!text.includes(String.fromCharCode(0))) out.push({ path, text })
+        } catch {
+          // Unreadable helper files are skipped, not trusted.
+        }
+      }
+    }
+  }
+  walk(dirname(skillPath), 0)
+  return out
+}
+
 /** Read up to `max` bytes from a local file; null for binary or unreadable files. */
 async function readCapped(path: string, max: number): Promise<string | null> {
   try {
@@ -117,7 +175,7 @@ async function readCapped(path: string, max: number): Promise<string | null> {
 
 type FindingRecord = {
   time: string
-  kind: "tool" | "prompt"
+  kind: "tool" | "prompt" | "surface"
   tool?: string
   source: string
   verdict: string
@@ -132,6 +190,7 @@ export default Plugin.define({
     const options: Options = parseOptions(ctx.options)
     const registrations: { dispose(): Promise<void> }[] = []
     const disposed = { value: false }
+    const surfaceFindings = new Map<string, SurfaceReport>()
 
     const logFinding = async (record: FindingRecord) => {
       if (options.logLimit <= 0 || disposed.value) return
@@ -180,6 +239,106 @@ export default Plugin.define({
             agent.system = AGENT_SYSTEM
             agent.permissions = AGENT_PERMISSIONS
           })
+        }),
+      )
+    }
+
+    // -----------------------------------------------------------------------
+    // Layer 1b': scan other skills and their bundled helper scripts. The
+    // skill tool is in skipTools, so skill bodies are only checked here.
+    // -----------------------------------------------------------------------
+    if (options.surface) {
+      registrations.push(
+        await ctx.skill.transform((editor) => {
+          const skills = editor.list().filter((s) => s.id !== SKILL_ID)
+          const scripts = new Map<string, { path: string; text: string }[]>()
+          const items: SurfaceItem[] = []
+          for (const skill of skills) {
+            items.push({ kind: "skill", id: skill.id, text: `${skill.description ?? ""}\n${skill.content}` })
+            const helpers = readSkillScripts(skill.path, options.maxScanBytes)
+            scripts.set(skill.id, helpers)
+            for (const helper of helpers) items.push({ kind: "script", id: helper.path, text: helper.text })
+          }
+          const reports = analyzeSurface(items, options.maxScanBytes)
+
+          for (const skill of skills) {
+            if (options.trustedSurface.includes(skill.id)) continue
+            const ownReport = reports.get(skill.id)
+            const helperReports = (scripts.get(skill.id) ?? []).map((h) => reports.get(h.path)).filter((r): r is SurfaceReport => r !== undefined && r.verdict !== "clean")
+            const flagged = [ownReport, ...helperReports].filter((r): r is SurfaceReport => r !== undefined && r.verdict !== "clean")
+            if (flagged.length === 0) continue
+            const report = flagged.reduce((worst, r) => (r.score > worst.score ? r : worst))
+            const action = surfaceActionFor(report, options)
+            surfaceFindings.set(skill.id, report)
+            void logFinding({
+              time: new Date().toISOString(),
+              kind: "surface",
+              tool: "skill",
+              source: skill.id,
+              verdict: report.verdict,
+              score: report.score,
+              signals: report.detections.map((d) => `${d.id}:${d.count}`),
+              action,
+            })
+            if (action === "block") {
+              editor.update(skill.id, (s) => {
+                s.content = `\u26d4 [prompt-blocker] SKILL BLOCKED \u2014 ${skill.id}\nReason: ${formatReport(report)}.\nThe skill content was withheld. Tell the user which skill was blocked and why.`
+              })
+            } else if (action === "sanitize") {
+              const clean = sanitizeText(skill.content, report, { extraPhrases: options.extraPhrases }).text
+              editor.update(skill.id, (s) => {
+                s.content = `${flagBanner(`skill ${skill.id}`, report)}\n\n${clean}`
+              })
+            } else if (action === "annotate") {
+              editor.update(skill.id, (s) => {
+                s.content = `${flagBanner(`skill ${skill.id}`, report)}\n\n${skill.content}`
+              })
+            }
+          }
+        }),
+      )
+    }
+
+    // -----------------------------------------------------------------------
+    // Layer 1c: scan tool descriptions and parameter schemas (incl. MCP tools)
+    // -----------------------------------------------------------------------
+    if (options.surface) {
+      registrations.push(
+        await ctx.tool.transform((editor) => {
+          const items: SurfaceItem[] = editor.list().map((tool) => ({
+            kind: "tool",
+            id: tool.id,
+            text: `${tool.description ?? ""}\n${schemaText(tool.input)}`,
+          }))
+          const reports = analyzeSurface(items, options.maxScanBytes)
+          for (const tool of editor.list()) {
+            const report = reports.get(tool.id)
+            if (!report || report.verdict === "clean" || options.trustedSurface.includes(tool.id)) continue
+            const action = surfaceActionFor(report, options)
+            surfaceFindings.set(tool.id, report)
+            void logFinding({
+              time: new Date().toISOString(),
+              kind: "surface",
+              tool: "tool-description",
+              source: tool.id,
+              verdict: report.verdict,
+              score: report.score,
+              signals: report.detections.map((d) => `${d.id}:${d.count}`),
+              action,
+            })
+            if (action === "block") {
+              editor.remove(tool.id)
+            } else if (action === "sanitize") {
+              const clean = sanitizeText(tool.description ?? "", report, { extraPhrases: options.extraPhrases }).text
+              editor.update(tool.id, (t) => {
+                t.description = `${flagBanner(`tool ${tool.id}`, report)}\n\n${clean}`
+              })
+            } else if (action === "annotate") {
+              editor.update(tool.id, (t) => {
+                t.description = `${flagBanner(`tool ${tool.id}`, report)}\n\n${tool.description ?? ""}`
+              })
+            }
+          }
         }),
       )
     }
@@ -401,6 +560,8 @@ export default Plugin.define({
             }
             const lines = [
               `prompt-blocker status: mode=${options.mode}, maxScanBytes=${options.maxScanBytes}, agent=${options.agent}, directive=${options.directive}, skill=${options.skill}`,
+              `surface=${options.surface}, flagged surface artifacts: ${surfaceFindings.size}${[...surfaceFindings.entries()].length > 0 ? ` (${[...surfaceFindings.entries()].map(([id, r]) => `${id}: ${r.verdict}`).join(", ")})` : ""}`,
+              `trustedSurface: ${options.trustedSurface.join(", ") || "(none)"}`,
               `skipTools: ${options.skipTools.join(", ") || "(none)"}`,
               `trustedPaths: ${options.trustedPaths.join(", ") || "(none)"}`,
               findings.length > 0 ? `Recent findings (newest first):` : `No findings recorded yet.`,

@@ -206,6 +206,14 @@ findings.
 | `directive` | `true` | Inject the standing untrusted-content directive |
 | `skill` | `true` | Register the `prompt-blocker` skill |
 | `logLimit` | `50` | Findings kept for the `/prompt-blocker` command |
+| `surface` | `true` | Scan the agent's own surface: other skills, their bundled helper scripts, and tool descriptions and parameter schemas (including MCP tools) |
+| `trustedSurface` | `[]` | Skill, tool, or script ids exempt from surface enforcement (use for false positives, e.g. installer docs) |
+
+Surface findings are enforced at load time, when there is no session to ask,
+so "confirm" becomes "block": a critical skill is withheld, a critical tool is
+removed from the tool list. Tool poisoning, cross-tool data flow, script
+behavior, coordinated chains across artifacts, and fragmented phrases are
+detected by `src/surface.ts`.
 
 ## Limitations
 

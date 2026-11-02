@@ -28,6 +28,11 @@ export type CategoryId =
   | "frontmatter-directive"
   | "encoded-payload"
   | "instruction-phrase"
+  | "tool-poisoning"
+  | "cross-tool-flow"
+  | "script-behavior"
+  | "coordinated-chain"
+  | "fragmented-phrase"
 
 export interface Detection {
   id: CategoryId
@@ -119,7 +124,7 @@ const PHRASE_CLASSES: PhraseClass[] = [
     containerOnly: false,
     patterns: [
       rx(
-        "\\bignore\\s+(?:all\\s+|any\\s+|the\\s+|your\\s+)?(?:previous|prior|above|earlier|preceding|past)\\b[\\s\\S]{0,40}?\\b(?:instructions?|directions?|rules?|prompts?|context|messages?|system)\\b",
+        "\\bignore\\s+(?:(?:all|any|the|your)\\s+){0,2}(?:previous|prior|above|earlier|preceding|past)\\b[\\s\\S]{0,40}?\\b(?:instructions?|directions?|rules?|prompts?|context|messages?|system)\\b",
       ),
       rx("\\bdisregard\\b[\\s\\S]{0,40}?\\b(?:instructions?|directions?|rules?|prompts?|the\\s+above|previous|prior)\\b"),
       rx("\\bforget\\s+(?:all|everything|about)\\b[\\s\\S]{0,40}?\\b(?:instructions?|rules?|prompts?|previous|prior|above|context)\\b"),

@@ -30,6 +30,10 @@ export interface Options {
   logLimit: number
   /** Verdict level at which "confirm" escalation happens in permissive mode. */
   permissiveConfirmAt: Verdict
+  /** Scan agent surface (skills, bundled scripts, tool descriptions). Default true. */
+  surface: boolean
+  /** Skill, tool, or script ids exempt from surface enforcement. */
+  trustedSurface: string[]
 }
 
 export const DEFAULT_SKIP_TOOLS = ["skill", "question"]
@@ -51,7 +55,19 @@ export function parseOptions(raw: Readonly<Record<string, unknown>> | undefined)
     skill: input.skill === undefined ? true : input.skill === true,
     logLimit,
     permissiveConfirmAt: "critical",
+    surface: input.surface === undefined ? true : input.surface === true,
+    trustedSurface: stringArray(input.trustedSurface) ?? [],
   }
+}
+
+/**
+ * Enforcement for agent-surface artifacts. Surface items are analyzed at
+ * registration, when no session exists to ask, so "confirm" resolves to
+ * "block" instead of prompting.
+ */
+export function surfaceActionFor(report: ScanReport, options: Options): Action {
+  const action = actionFor(report, options)
+  return action === "confirm" ? "block" : action
 }
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
