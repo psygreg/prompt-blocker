@@ -25,9 +25,8 @@ banners, no `/prompt-blocker` command, no directive in your instructions).
 
    - `--global` installs for every project in `~/.config/opencode/opencode.json(c)`;
      use `--project <dir>` instead to install in one project only.
-   - `--mode audit|standard|strict|permissive` also sets the mode option.
-     The plugin defaults to `audit` (banners only); set `standard` or `strict`
-     once you have observed it for a while.
+   - `--mode audit|standard|strict|permissive` also sets the mode option
+     (the default is `standard`; use `audit` for banners-only observation).
    - `--package <spec>` overrides the plugin source (default: the repository).
    - `--dry-run` previews the change without writing anything.
 
@@ -108,10 +107,10 @@ How findings are enforced depends on the configured mode:
 
 | Mode | Suspicious | Likely | Critical |
 | --- | --- | --- | --- |
-| `audit` (default) | banner | banner | banner (report only) |
-| `standard` | banner | banner + sanitize concealed signals | ask the user; sanitize if allowed, block if declined |
+| `standard` (default) | banner | banner + sanitize concealed signals | ask the user; sanitize if allowed, block if declined |
 | `strict` | banner | block | block |
 | `permissive` | banner | banner | ask the user |
+| `audit` | banner | banner | banner (report only) |
 
 Options: `mode`, `maxScanBytes`, `skipTools`, `trustedPaths`,
 `extraPhrases`, `agent`, `directive`, `skill`, `logLimit`. See the plugin

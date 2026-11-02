@@ -53,15 +53,14 @@ or `opencode.json` / `.opencode/opencode.json` in a project:
 }
 ```
 
-With options (it runs in `audit` mode by default — banners only; set
-`standard` or `strict` once you've observed what it flags):
+With options:
 
 ```jsonc
 {
   "plugins": [
     {
       "package": "prompt-blocker",
-      "options": { "mode": "standard", "trustedPaths": ["~/work/reference-docs/"] }
+      "options": { "mode": "strict", "trustedPaths": ["~/work/reference-docs/"] }
     }
   ]
 }
@@ -126,14 +125,10 @@ phrases).
 
 | Mode | suspicious | likely | critical |
 | --- | --- | --- | --- |
-| `audit` (default) | banner | banner | banner (report only — observe before enforcing) |
-| `standard` | banner | banner + sanitize | ask you; sanitize if allowed, block if declined |
+| `standard` (default) | banner | banner + sanitize | ask you; sanitize if allowed, block if declined |
 | `strict` | banner | block | block |
 | `permissive` | banner | banner | ask you |
-
-New installs start in `audit` so you can watch what it flags before it ever
-modifies content or prompts you; switch to `standard` or `strict` once you
-trust it.
+| `audit` | banner | banner | banner (report only) |
 
 - **Banner**: the content is prefixed with a short notice describing the
   findings (categories, counts, line numbers — never the attacker's payload
@@ -179,7 +174,7 @@ findings.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `mode` | `"audit"` | `audit` \| `standard` \| `strict` \| `permissive` — new installs start in `audit` (banners only) |
+| `mode` | `"standard"` | `standard` \| `strict` \| `permissive` \| `audit` |
 | `maxScanBytes` | `262144` | Bytes scanned per tool result / attachment (256 KiB) |
 | `skipTools` | `["skill", "question"]` | Tool names whose results are never scanned |
 | `trustedPaths` | `[]` | Absolute path prefixes exempt from enforcement (`~` expanded) |

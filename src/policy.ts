@@ -10,7 +10,7 @@ export type Mode = "standard" | "strict" | "permissive" | "audit"
 export type Action = "pass" | "annotate" | "sanitize" | "confirm" | "block"
 
 export interface Options {
-  /** Enforcement mode. Default "audit" — banners only, so new installs observe before they enforce. */
+  /** Enforcement mode. Default "standard". */
   mode: Mode
   /** Maximum bytes of text scanned per tool result / attachment. Default 256 KiB. */
   maxScanBytes: number
@@ -41,7 +41,7 @@ export function parseOptions(raw: Readonly<Record<string, unknown>> | undefined)
   const maxScanBytes = clampInt(input.maxScanBytes, 1024, 16 * 1024 * 1024, 262_144)
   const logLimit = clampInt(input.logLimit, 0, 1000, 50)
   return {
-    mode: typeof mode === "string" && modes.includes(mode as Mode) ? (mode as Mode) : "audit",
+    mode: typeof mode === "string" && modes.includes(mode as Mode) ? (mode as Mode) : "standard",
     maxScanBytes,
     skipTools: stringArray(input.skipTools) ?? DEFAULT_SKIP_TOOLS,
     trustedPaths: stringArray(input.trustedPaths) ?? [],
