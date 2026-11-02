@@ -1,0 +1,38 @@
+{
+  "name": "prompt-blocker",
+  "version": "0.1.0",
+  "description": "OpenCode plugin that detects and neutralizes prompt injection hidden in documents, files, and tool results before they reach your agent.",
+  "type": "module",
+  "license": "LGPL-2.1-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/psygreg/prompt-blocker.git"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "prompt-injection",
+    "security"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "skill",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "latest",
+    "bun-types": "latest",
+    "typescript": "latest"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": ">=2"
+  }
+}
