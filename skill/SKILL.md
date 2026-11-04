@@ -43,7 +43,8 @@ banners, no `/prompt-blocker` command, no directive in your instructions).
    directory (`.opencode/plugins/`, `~/.config/opencode/plugins/`): OpenCode
    loads every file there as a separate plugin, so the helper modules register
    as broken plugins and the plugin cannot find its bundled SKILL.md — a
-   degraded install it will then report as such. A local install always points
+   degraded install it will then report as such, naming any leftover loose
+   files it finds in plugin directories. A local install always points
    config at a directory containing the whole package (`package.json`, `src/`,
    `skill/`), either via the script's `--package <spec>`, via a `"package":`
    entry with an absolute path, or by copying the whole package into a

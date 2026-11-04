@@ -16,6 +16,7 @@
  */
 
 import { open, stat } from "node:fs/promises"
+import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { readdirSync, readFileSync, statSync, type Dirent } from "node:fs"
@@ -24,6 +25,7 @@ import { scanText, type ScanReport } from "./detect.js"
 import { actionFor, isTrustedPath, parseOptions, surfaceActionFor, type Options } from "./policy.js"
 import { analyzeSurface, type SurfaceItem } from "./surface.js"
 import { sanitizeText, type ScanReport as SurfaceReport } from "./detect.js"
+import { describeSpill, spillEvidence } from "./layout.js"
 import {
   annotateResult,
   applyToResult,
@@ -87,15 +89,16 @@ export const SKILL_DESCRIPTION =
  * as a whole package (e.g. its files were copied flat into an OpenCode
  * plugins directory) and the judgement layer is running without its skill.
  */
-function loadSkill(): { path: string; content: string; missing: boolean } {
+function loadSkill(): { path: string; content: string; missing: boolean; root: string } {
   const moduleDir = dirname(fileURLToPath(import.meta.url))
   const skillPath = join(moduleDir, "..", "skill", "SKILL.md")
   try {
-    return { path: skillPath, content: readFileSync(skillPath, "utf8"), missing: false }
+    return { path: skillPath, content: readFileSync(skillPath, "utf8"), missing: false, root: moduleDir }
   } catch {
     return {
       path: skillPath,
       missing: true,
+      root: moduleDir,
       content: `# Prompt Blocker\n\nThe full skill document could not be loaded from ${skillPath}. See the prompt-blocker README for the untrusted-content protocol and installation instructions.\n`,
     }
   }
@@ -202,11 +205,32 @@ export default Plugin.define({
     // A broken layout loses the bundled skill document (packaged installs
     // always ship SKILL.md next to the code); say so instead of degrading
     // silently. An explicitly disabled skill is not a broken install.
+    // A broken layout loses the bundled skill document (packaged installs
+    // always ship SKILL.md next to the code); say so instead of degrading
+    // silently. An explicitly disabled skill is not a broken install. Loose
+    // prompt-blocker source files inside an OpenCode plugins directory are
+    // the usual cause: OpenCode loads every file there as its own plugin,
+    // leaving several broken plugins and no bundled skill behind — name them.
     const skill = loadSkill()
+    const spillCandidates = [
+      dirname(skill.root), // flat spill: the plugins dir itself; package layouts: the package root
+      join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "opencode", "plugins"),
+      join(ctx.location?.project?.canonical ?? "", ".opencode", "plugins"),
+      join(ctx.location?.directory ?? "", ".opencode", "plugins"),
+    ]
+    const spills = spillEvidence(spillCandidates)
+    const spillText =
+      spills.length > 0 ? spills.map((spill) => describeSpill(spill.dir, spill.files)).join("; ") : undefined
     const degraded = skill.missing && options.skill
-    const degradedNotice = degraded
-      ? `DEGRADED INSTALL: prompt-blocker could not find its skill document (${skill.path}). It is probably installed incorrectly, e.g. its source files were copied directly into an OpenCode plugins directory, where every .ts file is loaded as a separate plugin; the helper modules then register as broken plugins. The detection hooks still run, but the untrusted-content skill is a stub. Tell the user about this and how to fix it: remove the copied files and reinstall with "opencode plugin add github:psygreg/prompt-blocker", or point a "plugins" config entry at a directory containing the whole package (package.json, src/ and skill/): { "package": "/absolute/path/to/prompt-blocker" }; restart opencode afterwards.`
+    const degradedCause = degraded
+      ? spillText
+        ? `Loose prompt-blocker source files were found directly inside ${spillText}; OpenCode loads every file placed in a plugins directory as its own separate plugin, so the helper modules register as broken plugins and the bundled skill document was left behind.`
+        : `It is probably installed incorrectly, e.g. its source files were copied directly into an OpenCode plugins directory, where every .ts file is loaded as a separate plugin; the helper modules then register as broken plugins.`
       : undefined
+    const degradedNotice =
+      degraded && degradedCause
+        ? `DEGRADED INSTALL: prompt-blocker could not find its skill document (${skill.path}). ${degradedCause} The detection hooks still run, but the untrusted-content skill is a stub. Tell the user about this and how to fix it: remove the copied files and reinstall with "opencode plugin add github:psygreg/prompt-blocker", or point a "plugins" config entry at a directory containing the whole package (package.json, src/ and skill/): { "package": "/absolute/path/to/prompt-blocker" }; restart opencode afterwards.`
+        : undefined
 
     const logFinding = async (record: FindingRecord) => {
       if (options.logLimit <= 0 || disposed.value) return
@@ -577,6 +601,11 @@ export default Plugin.define({
             const lines = [
               `prompt-blocker status: mode=${options.mode}, maxScanBytes=${options.maxScanBytes}, agent=${options.agent}, directive=${options.directive}, skill=${options.skill}`,
               ...(degradedNotice ? [degradedNotice] : []),
+              ...(spillText
+                ? [
+                    `loose prompt-blocker files loaded as separate (broken) plugins in ${spillText} — remove those leftover files and install the whole package instead (see /prompt-blocker docs or README)`,
+                  ]
+                : []),
               `surface=${options.surface}, flagged surface artifacts: ${surfaceFindings.size}${[...surfaceFindings.entries()].length > 0 ? ` (${[...surfaceFindings.entries()].map(([id, r]) => `${id}: ${r.verdict}`).join(", ")})` : ""}`,
               `trustedSurface: ${options.trustedSurface.join(", ") || "(none)"}`,
               `skipTools: ${options.skipTools.join(", ") || "(none)"}`,

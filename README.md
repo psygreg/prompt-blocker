@@ -76,10 +76,11 @@ or `opencode.json` / `.opencode/opencode.json` in a project:
 > ```
 >
 > The installer script accepts the same spec via `--package <spec>`, and a
-> whole-package copy placed in a **subdirectory** of the plugins folder (e.g.
+> `whole-package copy placed in a **subdirectory** of the plugins folder (e.g.
 > `~/.config/opencode/plugins/prompt-blocker/`) is loaded as one plugin. When
 > the skill document is missing from the layout the plugin detects it and
-> reports a degraded install in its `/prompt-blocker` status.
+> reports a degraded install in its `/prompt-blocker` status, naming the
+> leftover files it can still see lying loose in plugin directories.
 
 With options:
 
