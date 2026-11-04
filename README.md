@@ -61,6 +61,26 @@ or `opencode.json` / `.opencode/opencode.json` in a project:
 }
 ```
 
+> **Local installs: never copy the plugin's `.ts` files into a plugins
+> directory.** OpenCode loads every file placed directly inside
+> `.opencode/plugins/` or `~/.config/opencode/plugins/` as its own separate
+> plugin — prompt-blocker's helper modules (`apply.ts`, `detect.ts`,
+> `policy.ts`, `surface.ts`) would each register as broken plugins, and
+> `index.ts` would not find its bundled `SKILL.md`, leaving a silently
+> degraded install. To install from a checkout or a local copy, point the
+> config at a **directory containing the whole package** (`package.json`,
+> `src/`, `skill/`) — absolute paths work:
+>
+> ```jsonc
+> { "plugins": [{ "package": "/absolute/path/to/prompt-blocker" }] }
+> ```
+>
+> The installer script accepts the same spec via `--package <spec>`, and a
+> whole-package copy placed in a **subdirectory** of the plugins folder (e.g.
+> `~/.config/opencode/plugins/prompt-blocker/`) is loaded as one plugin. When
+> the skill document is missing from the layout the plugin detects it and
+> reports a degraded install in its `/prompt-blocker` status.
+
 With options:
 
 ```jsonc
@@ -232,7 +252,7 @@ detected by `src/surface.ts`.
 
 ```sh
 bun install
-bun test        # 65 tests: detection engine, policy, application layer
+bun test        # surface analysis tests (see src/surface.test.ts)
 bun run check   # tsc --noEmit
 ```
 

@@ -34,9 +34,20 @@ banners, no `/prompt-blocker` command, no directive in your instructions).
    formatting, and unrelated keys, never leaves a trailing comma (strict
    `opencode.json` stays valid), validates the file parses BEFORE writing,
    keeps a `<file>.prompt-blocker.bak` backup, and is idempotent. Flags:
-   `--mode audit|standard|strict|permissive` also sets the mode option (the
-   default is `standard`; use `audit` for banners-only observation),
-   `--package <spec>` overrides the source, `--dry-run` previews.
+   `--package <spec>` overrides the source — an absolute path to the prompt-
+   blocker checkout works, `--mode audit|standard|strict|permissive` also sets
+   the mode option (the default is `standard`; use `audit` for banners-only
+   observation), `--dry-run` previews.
+
+   Never copy prompt-blocker's `.ts` source files directly into a plugins
+   directory (`.opencode/plugins/`, `~/.config/opencode/plugins/`): OpenCode
+   loads every file there as a separate plugin, so the helper modules register
+   as broken plugins and the plugin cannot find its bundled SKILL.md — a
+   degraded install it will then report as such. A local install always points
+   config at a directory containing the whole package (`package.json`, `src/`,
+   `skill/`), either via the script's `--package <spec>`, via a `"package":`
+   entry with an absolute path, or by copying the whole package into a
+   subdirectory of the plugins folder.
 
 3. Restart the background service so the plugin loads:
    `opencode service restart`.
