@@ -29,6 +29,7 @@ export type CategoryId =
   | "encoded-payload"
   | "instruction-phrase"
   | "tool-poisoning"
+  | "tool-steering"
   | "cross-tool-flow"
   | "script-behavior"
   | "coordinated-chain"
@@ -207,6 +208,13 @@ const PHRASE_CLASSES: PhraseClass[] = [
   },
 ]
 
+/**
+ * Score cap for visible instruction phrases taken together. Text findings on
+ * agent-surface artifacts share it, so text alone can reach "likely" but never
+ * "critical".
+ */
+export const PHRASE_FAMILY_CAP = 44
+
 // ---------------------------------------------------------------------------
 // Hidden styling patterns
 // ---------------------------------------------------------------------------
@@ -216,7 +224,7 @@ const HIDDEN_STYLING: { id: string; pattern: RegExp }[] = [
   { id: "opacity-zero", pattern: /(?:^|["';\s{])opacity\s*:\s*0(?:\.0+)?\s*(?:!important)?\s*(?:["';}]|$)/gi },
   { id: "visibility-hidden", pattern: /visibility\s*:\s*hidden/gi },
   { id: "display-none", pattern: /display\s*:\s*none/gi },
-  { id: "hidden-attribute", pattern: /<[a-z][^>]*\shidden(?:\s*[=>]|\s+[a-z-])/gi },
+  { id: "hidden-attribute", pattern: /<[a-z][^>]{0,2000}\shidden(?:\s*[=>]|\s+[a-z-])/gi },
   { id: "offscreen-position", pattern: /(?:left|right|top|margin-left|margin-right|text-indent)\s*:\s*-(?:[1-9]\d{2,}|9999)(?:px|em|rem)/gi },
   { id: "absolute-offscreen", pattern: /position\s*:\s*(?:absolute|fixed)[^;}]{0,120}?(?:left|top)\s*:\s*-\d{3,}/gi },
   { id: "transparent-text", pattern: /color\s*:\s*transparent/gi },
@@ -243,6 +251,41 @@ const HIDDEN_STYLING: { id: string; pattern: RegExp }[] = [
     ),
   },
 ]
+
+/**
+ * Spans where markup or CSS applies: start tags, <style> elements, and {} rule
+ * blocks. Hidden styling only hides text inside one of these. The same words in
+ * prose, such as a document explaining `display:none`, hide nothing from the
+ * reader. Tags are read quote-aware, so a ">" inside an attribute value does not
+ * end the tag early, and a tag cut short by another "<" still counts up to it.
+ */
+function markupSpans(text: string): (index: number) => boolean {
+  const spans: [number, number][] = []
+  for (const m of text.matchAll(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi)) spans.push([m.index ?? 0, (m.index ?? 0) + m[0].length])
+  for (const m of text.matchAll(/\{[^{}]*\}/g)) spans.push([m.index ?? 0, (m.index ?? 0) + m[0].length])
+  for (const m of text.matchAll(/<[a-zA-Z/!?]/g)) {
+    const start = m.index ?? 0
+    let end = start + 1
+    let quote = ""
+    for (let j = start + 1; j < text.length && j - start < 4000; j++) {
+      const ch = text[j]
+      if (quote) {
+        if (ch === quote) quote = ""
+      } else if (ch === '"' || ch === "'") {
+        quote = ch
+      } else if (ch === ">") {
+        end = j + 1
+        break
+      } else if (ch === "<") {
+        end = j
+        break
+      }
+      end = j + 1
+    }
+    spans.push([start, end])
+  }
+  return (index) => spans.some(([start, end]) => index >= start && index < end)
+}
 
 // ---------------------------------------------------------------------------
 // Containers (HTML comments, script/style bodies, attributes, frontmatter)
@@ -682,11 +725,12 @@ export function scanText(rawText: string, options: ScanOptions = {}): ScanReport
 
   // --- Hidden styling -------------------------------------------------------
   const stylingHits: { id: string; index: number }[] = []
+  const inMarkup = markupSpans(text)
   for (const styling of HIDDEN_STYLING) {
     styling.pattern.lastIndex = 0
     let m: RegExpExecArray | null
     while ((m = styling.pattern.exec(text)) !== null) {
-      stylingHits.push({ id: styling.id, index: m.index })
+      if (inMarkup(m.index)) stylingHits.push({ id: styling.id, index: m.index })
       if (m[0].length === 0) styling.pattern.lastIndex++
     }
   }
@@ -766,7 +810,7 @@ export function scanText(rawText: string, options: ScanOptions = {}): ScanReport
       ...(obfuscatedOnly.length > 0 ? ["obfuscated via entity/percent encoding"] : []),
     ],
     visibleScan.hits.slice(0, 3).map((h) => excerpt(text, h.index, 30)),
-    44,
+    PHRASE_FAMILY_CAP,
   )
 
   // --- Encoded payloads -----------------------------------------------------

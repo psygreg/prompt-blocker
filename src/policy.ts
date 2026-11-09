@@ -14,8 +14,6 @@ export interface Options {
   mode: Mode
   /** Maximum bytes of text scanned per tool result / attachment. Default 256 KiB. */
   maxScanBytes: number
-  /** Tool names whose results are never scanned. */
-  skipTools: string[]
   /** Absolute path prefixes exempt from enforcement (tilde expanded). */
   trustedPaths: string[]
   /** Extra literal phrases or regex sources treated as instruction phrases. */
@@ -32,11 +30,18 @@ export interface Options {
   permissiveConfirmAt: Verdict
   /** Scan agent surface (skills, bundled scripts, tool descriptions). Default true. */
   surface: boolean
-  /** Skill, tool, or script ids exempt from surface enforcement. */
-  trustedSurface: string[]
 }
 
-export const DEFAULT_SKIP_TOOLS = ["skill", "question"]
+/**
+ * Options removed because they exempted content by name (tool, skill, or script
+ * ids). Anyone can choose a name, so such exemptions are loopholes. They are
+ * reported in /prompt-blocker status rather than silently ignored.
+ */
+export const REMOVED_OPTIONS = ["skipTools", "trustedSurface"]
+
+export function removedOptionsIn(raw: Readonly<Record<string, unknown>> | undefined): string[] {
+  return REMOVED_OPTIONS.filter((key) => raw?.[key] !== undefined)
+}
 
 export function parseOptions(raw: Readonly<Record<string, unknown>> | undefined): Options {
   const input = raw ?? {}
@@ -47,7 +52,6 @@ export function parseOptions(raw: Readonly<Record<string, unknown>> | undefined)
   return {
     mode: typeof mode === "string" && modes.includes(mode as Mode) ? (mode as Mode) : "standard",
     maxScanBytes,
-    skipTools: stringArray(input.skipTools) ?? DEFAULT_SKIP_TOOLS,
     trustedPaths: stringArray(input.trustedPaths) ?? [],
     extraPhrases: stringArray(input.extraPhrases) ?? [],
     agent: input.agent === undefined ? true : input.agent === true,
@@ -56,7 +60,6 @@ export function parseOptions(raw: Readonly<Record<string, unknown>> | undefined)
     logLimit,
     permissiveConfirmAt: "critical",
     surface: input.surface === undefined ? true : input.surface === true,
-    trustedSurface: stringArray(input.trustedSurface) ?? [],
   }
 }
 

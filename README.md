@@ -130,7 +130,7 @@ config entry — it never updates an installed package.
 ### What is scanned
 
 - **Tool results** (`read`, `grep`, `glob`, `webfetch`, `websearch`, `shell`,
-  MCP tools, subagent reports — every tool except `skill` and `question`):
+  MCP tools, subagent reports, and the `skill` and `question` tools too):
   all text returned to the model is scanned before the model sees it.
 - **Prompt attachments**: files attached to a prompt are scanned before the
   prompt is admitted.
@@ -163,7 +163,11 @@ config entry — it never updates an installed package.
 Each category carries a weight; the total score produces a verdict:
 `suspicious` (low), `likely` (medium), or `critical` (concealed instructions,
 decoded payloads, or concealment combined with override/exfiltration/secrecy
-phrases).
+phrases). Visible wording alone is never critical: instruction phrases, tool
+steering, and cross-artifact patterns can reach `likely` and no higher, so they
+are flagged for the agent to evaluate. Hidden markup or CSS
+counts only where it applies, inside a tag, a `<style>` element, or a rule
+block; prose that merely names `display:none` hides nothing.
 
 ### What happens on a match
 
@@ -220,7 +224,6 @@ findings.
 | --- | --- | --- |
 | `mode` | `"standard"` | `standard` \| `strict` \| `permissive` \| `audit` |
 | `maxScanBytes` | `262144` | Bytes scanned per tool result / attachment (256 KiB) |
-| `skipTools` | `["skill", "question"]` | Tool names whose results are never scanned |
 | `trustedPaths` | `[]` | Absolute path prefixes exempt from enforcement (`~` expanded) |
 | `extraPhrases` | `[]` | Additional regexes treated as instruction phrases |
 | `agent` | `true` | Register the `document-reviewer` subagent |
@@ -228,13 +231,25 @@ findings.
 | `skill` | `true` | Register the `prompt-blocker` skill |
 | `logLimit` | `50` | Findings kept for the `/prompt-blocker` command |
 | `surface` | `true` | Scan the agent's own surface: other skills, their bundled helper scripts, and tool descriptions and parameter schemas (including MCP tools) |
-| `trustedSurface` | `[]` | Skill, tool, or script ids exempt from surface enforcement (use for false positives, e.g. installer docs) |
 
 Surface findings are enforced at load time, when there is no session to ask,
 so "confirm" becomes "block": a critical skill is withheld, a critical tool is
-removed from the tool list. Tool poisoning, cross-tool data flow, script
-behavior, coordinated chains across artifacts, and fragmented phrases are
-detected by `src/surface.ts`.
+removed from the tool list. A tool description or skill is critical when it
+tells the model to hide an action from the user, or to read local secrets
+(credential files, SSH keys, `.env` files, environment keys, conversation
+history) and pass or send them on. Other steering wording, such as "before
+calling this tool, list the categories", is flagged for the agent to evaluate
+and kept. Cross-tool wording and coordinated chains are flagged too. A chain
+needs a real secret source, a credential file or a credential being read, so a
+tool that only mentions a password dialog is not one. Helper scripts are judged
+on what they do, by `src/surface.ts`, and can be withheld when several dangerous
+behaviors combine.
+
+There are no exemptions by name. A tool, skill, or script cannot be excluded by
+its id, since ids are chosen by whoever writes the content. `trustedPaths`, which
+you set for directories you control, is the only per-source exemption. The
+`skipTools` and `trustedSurface` options from earlier versions no longer have
+any effect; `/prompt-blocker` lists them as ignored.
 
 ## Limitations
 
@@ -253,7 +268,7 @@ detected by `src/surface.ts`.
 
 ```sh
 bun install
-bun test        # surface analysis tests (see src/surface.test.ts)
+bun test        # detection, surface, policy, and permission tests
 bun run check   # tsc --noEmit
 ```
 
