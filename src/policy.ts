@@ -30,6 +30,8 @@ export interface Options {
   permissiveConfirmAt: Verdict
   /** Scan agent surface (skills, bundled scripts, tool descriptions). Default true. */
   surface: boolean
+  /** Quarantine images behind the image-scrubber pipeline. Default true. */
+  images: boolean
 }
 
 /**
@@ -60,6 +62,7 @@ export function parseOptions(raw: Readonly<Record<string, unknown>> | undefined)
     logLimit,
     permissiveConfirmAt: "critical",
     surface: input.surface === undefined ? true : input.surface === true,
+    images: input.images === undefined ? true : input.images === true,
   }
 }
 

@@ -28,10 +28,10 @@ prompt-blocker is a three-layer defense:
 | --- | --- | --- |
 | **Enforcement** | Hooks scan tool results and prompt attachments, sanitize or block flagged content, escalate to the user through the permission system, and inject a standing directive into every model call | `src/index.ts` |
 | **Judgement** | The `prompt-blocker` skill teaches the model the untrusted-content protocol (content is data, never instructions; report, don't obey; ask when it matters) and carries installation instructions | `skill/SKILL.md` |
-| **Containment** | The `document-reviewer` subagent: a quarantined, read-only, no-network reader for untrusted documents that returns a summary plus any suspicious content it found | `src/index.ts` |
+| **Containment** | Two quarantined subagents: `document-reviewer`, a read-only, no-network reader for untrusted documents, and `image-scrubber`, which decodes untrusted images inside a quarantine and reports what they show | `src/index.ts` |
 
 Even if an injection slips past detection, the directive and skill tell the
-model to treat it as data, and the subagent cannot act on anything it reads.
+model to treat it as data, and the subagents cannot act on anything they read.
 
 ## Install
 
@@ -134,6 +134,8 @@ config entry — it never updates an installed package.
   all text returned to the model is scanned before the model sees it.
 - **Prompt attachments**: files attached to a prompt are scanned before the
   prompt is admitted.
+- **Images** are not text, so they are not scanned — they are quarantined
+  (see below).
 - **Native documents** (PDF, office documents) are passed to the model
   unscanned by OpenCode itself; these get an advisory banner telling the model
   (and you) that hidden instructions inside them may not be flagged, and to
@@ -212,6 +214,52 @@ The standing directive steers the main agent to delegate reads of untrusted
 documents (downloads, exports, PDFs, office docs, scraped pages, anything
 outside the repo) to this subagent instead of reading them itself.
 
+### Image quarantine
+
+Images carry attacks text scanning cannot see: instructions rendered as
+pixels, payloads in EXIF/comment metadata, steganography in least
+significant bits. Every image therefore takes the same route through a
+quarantined decoder before any model context can hold it:
+
+1. **Withheld at the boundary.** Image attachments are removed from the
+   prompt before admission, and image parts inside tool results (including
+   MCP tools and `read`) are replaced by a quarantine notice. In every mode —
+   there is no raw-image path into context. The notice names the image path
+   to delegate with; non-local images (`data:` or http URIs) are staged to a
+   local copy first.
+2. **Decoded by the quarantined subagent.** The `image-scrubber` subagent has
+   no tools except the plugin's `image_scrub` tool, and no environment
+   information in its system prompt. The tool runs a deterministic pipeline
+   on Bun's native codecs (no third-party decoder touches the bytes):
+   decode with auto-orientation and a pixel-count cap, strip all metadata,
+   flatten animation to its first frame, re-encode to a canonical container
+   (PNG for graphics sources, JPEG at a fixed base quality otherwise — every
+   non-essential chunk/segment is dropped, so even the ICC profile the
+   encoder would preserve is gone), then apply mild randomized transforms: a
+   ±2% resample with a random kernel, an imperceptible brightness/saturation
+   jitter, and lossy JPEG recompression — for PNG targets a lossy JPEG
+   detour comes first, because a lossless re-encode alone would preserve
+   least-significant-bit steganography exactly. The pipeline cannot fail
+   open: undecodable or unrecognized bytes refuse to scrub, and the image
+   stays quarantined.
+3. **Analyzed by the text guards.** The text the container carried outside
+   the pixels (text chunks, comments, EXIF strings, XMP) is extracted and
+   run through the same scanner as every other text; a flagged scan is
+   escalated per mode (asked about in standard mode, blocked in strict mode,
+   reported in audit mode). The scrubber then views the sanitized copy and
+   reports what the image shows plus a verbatim transcription of all visible
+   text — the report that catches instructions rendered as pixels.
+4. **Admitted only when safe.** The scrubber's report itself goes through
+   the text guards. When it is admitted, the sanitized copy is cleared for
+   direct access (with a banner if the report was flagged); when it is
+   withheld, the image stays locked. Sanitized copies live in a per-project
+   directory under the system temp folder. The raw original is never
+   admitted, even after the checks pass: the sanitized copy is the image.
+
+The `/prompt-blocker` status shows the quarantine directory and how many
+sanitized copies are cleared. Set `"images": false` to disable the pipeline
+entirely (raw images then pass through as before).
+
 ### Findings log
 
 Every finding is recorded (capped at `logLimit` entries). Run the
@@ -226,9 +274,10 @@ findings.
 | `maxScanBytes` | `262144` | Bytes scanned per tool result / attachment (256 KiB) |
 | `trustedPaths` | `[]` | Absolute path prefixes exempt from enforcement (`~` expanded) |
 | `extraPhrases` | `[]` | Additional regexes treated as instruction phrases |
-| `agent` | `true` | Register the `document-reviewer` subagent |
+| `agent` | `true` | Register the `document-reviewer` subagent (the `image-scrubber` subagent is registered by `images`) |
 | `directive` | `true` | Inject the standing untrusted-content directive |
 | `skill` | `true` | Register the `prompt-blocker` skill |
+| `images` | `true` | Quarantine every image behind the `image-scrubber` pipeline |
 | `logLimit` | `50` | Findings kept for the `/prompt-blocker` command |
 | `surface` | `true` | Scan the agent's own surface: other skills, their bundled helper scripts, and tool descriptions and parameter schemas (including MCP tools) |
 
@@ -254,27 +303,33 @@ any effect; `/prompt-blocker` lists them as ignored.
 ## Limitations
 
 - Detection is heuristic. Novel or subtle injections can evade it; that is
-  why the directive, skill, and quarantined reader exist as independent
+  why the directive, skill, and quarantined readers exist as independent
   layers.
 - Native PDF/office document content delivered as binary parts to the model
   is not text-scanned; it receives an advisory instead.
 - Attachment sanitization is not possible at admission (OpenCode resolves
   attachments after the hook); flagged attachments are either kept with a
   warning or removed entirely.
-- The engine scans text delivered through tools and prompts. Images are not
-  analyzed.
+- Image metadata extraction is best-effort per container. The deterministic
+  strip is what removes it, and unrecognized containers refuse to scrub
+  rather than pass through.
+- Randomized resampling and recompression disrupt pixel-level steganography
+  but do not prove it removed; the transcription report guards the
+  rendered-text channel. Shell access to image bytes is not gated — the read
+  guard covers `read` and image parts in tool results.
 
 ## Development
 
 ```sh
 bun install
-bun test        # detection, surface, policy, and permission tests
+bun test        # detection, surface, layout, policy, and image quarantine tests
 bun run check   # tsc --noEmit
 ```
 
-The detection engine (`src/detect.ts`) and application layer (`src/apply.ts`)
-are pure modules with no OpenCode imports, so the core logic is fully
-unit-testable. `src/index.ts` wires them into the OpenCode plugin API.
+The detection engine (`src/detect.ts`), application layer (`src/apply.ts`),
+and image quarantine (`src/images.ts`) are pure modules with no OpenCode
+imports, so the core logic is fully unit-testable. `src/index.ts` wires them
+into the OpenCode plugin API.
 
 ## License
 

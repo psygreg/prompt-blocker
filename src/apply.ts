@@ -180,6 +180,59 @@ export function attachmentRemovedNotice(name: string, report: ScanReport): strin
 }
 
 // ---------------------------------------------------------------------------
+// Image quarantine notices
+// ---------------------------------------------------------------------------
+
+/**
+ * Model-facing notice for an image attachment that was withheld before
+ * admission. Never describes the image contents; only the path the model may
+ * hand to the quarantined decoder.
+ */
+export function imageQuarantineNotice(name: string, handoff: string | undefined): string {
+  const where = handoff
+    ? ` Pass the image path "${handoff}" to the subagent.`
+    : " No readable copy of the image could be staged; ask the user how to proceed."
+  return [
+    `\u26a0\ufe0f [prompt-blocker] IMAGE QUARANTINED \u2014 ${name}`,
+    `The raw image was withheld before admission. Do not read, open, or process the original file.`,
+    `Delegate the decoding to the image-scrubber subagent: it strips metadata, re-encodes the image canonically, applies randomized transforms, and returns an analyzed report.${where}`,
+    `You may access the image only through the sanitized copy the subagent returns, and only after its report passes the checks. If the report is withheld, tell the user.`,
+  ].join("\n")
+}
+
+/** Model-facing notice replacing an image part inside a tool result. */
+export function imagePartNotice(label: string, handoff: string | undefined): string {
+  const where = handoff
+    ? ` Pass the image path "${handoff}" to the subagent.`
+    : " No readable copy of the image could be staged; ask the user how to proceed."
+  return [
+    `\u26a0\ufe0f [prompt-blocker] IMAGE REPLACED \u2014 ${label}`,
+    `This tool result contained an image; it was replaced by this notice before you saw it. Do not try to access the original.`,
+    `Delegate the decoding to the image-scrubber subagent, which returns a sanitized copy and an analyzed report.${where}`,
+    `Access the image only through the sanitized copy, after its report passes the checks.`,
+  ].join("\n")
+}
+
+/** Error thrown by the read guard when an image is accessed directly. */
+export function imageReadDeniedNotice(path: string, state: "unsanitized" | "withheld"): string {
+  if (state === "withheld") {
+    return `prompt-blocker: the sanitized copy ${path} exists, but its analysis report was flagged or withheld, so direct access stays denied. Work from the report you have, or tell the user how to proceed.`
+  }
+  return `prompt-blocker: direct access to ${path} is denied \u2014 it is an image that has not been sanitized. Delegate to the image-scrubber subagent with this path; it returns a sanitized copy and an analyzed report. Access the sanitized copy only after the checks pass.`
+}
+
+/** Model-facing notice that replaces a scrub report the policy withheld. */
+export function imageScrubBlockedNotice(source: string, report: ScanReport, reason: "strict-mode" | "user-denied"): string {
+  const why = reason === "strict-mode" ? "strict mode blocks this content automatically" : "the user declined to admit this content"
+  return [
+    `\u26d4 [prompt-blocker] IMAGE SCRUB WITHHELD \u2014 ${source}`,
+    `Reason: ${formatReport(report)}.`,
+    `${why.charAt(0).toUpperCase()}${why.slice(1)}. The sanitized copy stays locked: do not try to view the image.`,
+    `Tell the user what was found and ask how to proceed.`,
+  ].join("\n")
+}
+
+// ---------------------------------------------------------------------------
 // Result mutation
 // ---------------------------------------------------------------------------
 

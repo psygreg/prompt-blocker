@@ -22,7 +22,7 @@ import { readdirSync } from "node:fs"
  * too generic to stand alone as evidence. Test files count too — they are
  * equally incompatible with the plugins directory.
  */
-const OWN_MODULES = new Set(["apply", "detect", "policy", "surface", "surface.test"])
+const OWN_MODULES = new Set(["apply", "detect", "policy", "surface", "images", "surface.test", "images.test"])
 
 /** Which of `files` look like prompt-blocker's runtime modules. */
 export function spilledPluginFiles(files: string[]): string[] {

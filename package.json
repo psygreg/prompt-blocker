@@ -1,7 +1,7 @@
 {
   "name": "prompt-blocker",
   "version": "0.1.0",
-  "description": "OpenCode plugin that detects and neutralizes prompt injection hidden in documents, files, and tool results before they reach your agent.",
+  "description": "OpenCode plugin that detects and neutralizes prompt injection hidden in documents, files, images, and tool results before they reach your agent.",
   "type": "module",
   "license": "LGPL-2.1-or-later",
   "repository": {
